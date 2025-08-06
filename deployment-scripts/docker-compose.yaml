@@ -1,0 +1,11 @@
+services:
+  caddy:
+    image: docker.io/caddy:alpine
+    ports:
+      - "8080:8080"
+    network_mode: slirp4netns
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    restart: unless-stopped
+    env_file:
+      - .env
