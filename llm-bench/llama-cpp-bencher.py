@@ -291,7 +291,7 @@ def _format_b_flag(b: str) -> str:
     return b
 
 
-def _render_key(build: str, fa: str, b: str, hiplt: str) -> str:
+def _render_key(build: str, fa: str, b: str, hiplt: str, rpc: str = "", tensor_split: str = "") -> str:
     """Return the key used to look up style info in :data:`RENDER`."""
     backend = build.split("-", 1)[-1]
     parts = [backend]
@@ -301,10 +301,14 @@ def _render_key(build: str, fa: str, b: str, hiplt: str) -> str:
         parts.append("hipblaslt")
     if b:
         parts.append(_format_b_flag(b))
+    if rpc:
+        parts.append("rpc")
+    if tensor_split:
+        parts.append("ts")
     return "_".join(parts)
 
 
-def _make_label(build: str, fa: str, b: str, hiplt: str) -> str:
+def _make_label(build: str, fa: str, b: str, hiplt: str, rpc: str = "", tensor_split: str = "") -> str:
     backend = build.split("-", 1)[-1].upper()
     parts = []
     if hiplt:
@@ -313,19 +317,26 @@ def _make_label(build: str, fa: str, b: str, hiplt: str) -> str:
         parts.append("fa=1")
     if b:
         parts.append(_format_b_flag(b))
+    if rpc:
+        parts.append(f"rpc={rpc}")
+    if tensor_split:
+        parts.append(f"ts={tensor_split}")
     return f"{backend} {' '.join(parts)}".strip()
 
 
 def comb_plot(df, metric, label, mode, out):
     fig, ax = plt.subplots(figsize=(8, 5))
     subset = df[df["mode"] == mode]
-    for (build, fa, b, hiplt), grp in subset.groupby(["build", "fa", "b", "hipblaslt"]):
-        key = _render_key(build, fa, b, hiplt)
+    # Group by all relevant parameters including the new ones
+    group_cols = ["build", "fa", "b", "hipblaslt", "rpc", "tensor_split"]
+    for group_key, grp in subset.groupby(group_cols):
+        build, fa, b, hiplt, rpc, tensor_split = group_key
+        key = _render_key(build, fa, b, hiplt, rpc, tensor_split)
         style = RENDER.get(key, {})
         ax.plot(
             grp["value"],
             grp[metric],
-            label=_make_label(build, fa, b, hiplt),
+            label=_make_label(build, fa, b, hiplt, rpc, tensor_split),
             **style,
         )
     if ax.lines:
@@ -340,23 +351,26 @@ def comb_plot(df, metric, label, mode, out):
 
 def sweep_table(df,mode):
     vals=sorted(df[df['mode']==mode]['value'].unique())
-    headers=['backend','hipblaslt','-fa','-b']+[str(v) for v in vals]
+    headers=['backend','hipblaslt','-fa','-b','rpc','tensor-split']+[str(v) for v in vals]
     rows=[]
-    for (b,fa,bf,hiplt),grp in df.groupby(['build','fa','b','hipblaslt']):
-        row=[b,str(hiplt),fa,bf]
+    # Group by all relevant parameters including the new ones
+    group_cols = ['build','fa','b','hipblaslt','rpc','tensor_split']
+    for group_key,grp in df.groupby(group_cols):
+        b,fa,bf,hiplt,rpc,ts = group_key
+        row=[b,str(hiplt),fa,bf,rpc or '-',ts or '-']
         for v in vals:
             sub=grp[(grp['mode']==mode)&(grp['value']==v)]
             row.append(sub['tokens_per_sec'].iloc[0] if not sub.empty else None)
         rows.append(row)
 
     # determine the best value for each concurrency column
-    best={v:max((r[i+4] or 0 for r in rows),default=0) for i,v in enumerate(vals)}
+    best={v:max((r[i+6] or 0 for r in rows),default=0) for i,v in enumerate(vals)}
 
     table=[]
     for row in rows:
-        formatted=row[:4]
+        formatted=row[:6]
         for i,v in enumerate(vals):
-            val=row[i+4]
+            val=row[i+6]
             if val is None:
                 formatted.append('-')
             else:
@@ -371,7 +385,10 @@ def write_summary(df,out):
             comb_plot(df,met,lbl,mode,out)
 
     rows=[]
-    for (b,fa,bf,hiplt),grp in df.groupby(['build','fa','b','hipblaslt']):
+    # Group by all relevant parameters including the new ones
+    group_cols = ['build','fa','b','hipblaslt','rpc','tensor_split']
+    for group_key,grp in df.groupby(group_cols):
+        b,fa,bf,hiplt,rpc,ts = group_key
         def _get(mode,val):
             sub=grp[(grp['mode']==mode)&(grp['value']==val)]
             return sub['tokens_per_sec'].iloc[0] if not sub.empty else None
@@ -382,7 +399,7 @@ def write_summary(df,out):
         # ensures we report memory consumed by the benchmark itself even when
         # the GPU already had allocations prior to the run.
         mem=(grp['vram_delta_mib'] + grp['gtt_delta_mib']).max()
-        rows.append({'backend':b,'hipblaslt':hiplt,'fa':fa,'b':bf,'pp512':pp512,'tg128':tg128,'mem':mem})
+        rows.append({'backend':b,'hipblaslt':hiplt,'fa':fa,'b':bf,'rpc':rpc,'tensor_split':ts,'pp512':pp512,'tg128':tg128,'mem':mem})
 
     best_pp=max((r['pp512'] or 0 for r in rows),default=0)
     best_tg=max((r['tg128'] or 0 for r in rows),default=0)
@@ -393,9 +410,9 @@ def write_summary(df,out):
         pp = f"**{r['pp512']}**" if r['pp512']==best_pp and r['pp512'] is not None else (r['pp512'] if r['pp512'] is not None else '-')
         tg = f"**{r['tg128']}**" if r['tg128']==best_tg and r['tg128'] is not None else (r['tg128'] if r['tg128'] is not None else '-')
         mem = f"**{r['mem']}**" if r['mem']==best_mem else r['mem']
-        table.append([r['backend'],r.get('hipblaslt',''),r['fa'],r['b'],pp,tg,mem])
+        table.append([r['backend'],r.get('hipblaslt',''),r['fa'],r['b'],r.get('rpc',''),r.get('tensor_split',''),pp,tg,mem])
 
-    headers=['backend','hipblaslt','-fa','-b','pp512','tg128','max_mem']
+    headers=['backend','hipblaslt','-fa','-b','rpc','tensor-split','pp512','tg128','max_mem']
     top_tab=tabulate(table,headers=headers,tablefmt='github')
     pp_tab=sweep_table(df,'pp')
     tg_tab=sweep_table(df,'tg')
@@ -483,6 +500,16 @@ def main():
     res_file=out/'results.jsonl'
     existing_df=pd.read_json(res_file,orient='records',lines=True) if res_file.exists() else pd.DataFrame()
     base_flags=args.flags.strip()
+    
+    # Build additional flags from new arguments
+    additional_flags = []
+    if args.rpc:
+        additional_flags.append(f'--rpc {args.rpc}')
+    if args.tensor_split:
+        additional_flags.append(f'--tensor-split {args.tensor_split}')
+    
+    base_flags = " ".join([base_flags] + additional_flags).strip()
+    
     for b,bin in builds.items():
         env_opts=[{}]
         # strip the optional "llama.cpp-" prefix so we match the logical backend
