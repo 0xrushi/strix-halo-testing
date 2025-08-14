@@ -81,6 +81,60 @@ Now you should be able to compile as normal:
 cmake -S . -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1151 -DGGML_HIP_ROCWMMA_FATTN=ON  && cmake --build build --config Release -j32
 ```
 
+### llama-swap for Multiple Models
+To launch multiple models simultaneously, you can use [llama-swap](https://github.com/ggerganov/llama-swap) which allows you to run multiple llama.cpp models on the same GPU by swapping them in and out of memory as needed.
+
+Create a configuration file (e.g., `llama-swap-config.yaml`) to define your models:
+
+```yaml
+models:
+  - name: "llama2-7b"
+    path: "/path/to/llama2-7b.gguf"
+    context_size: 4096
+    gpu_layers: 35
+    
+  - name: "mistral-7b"
+    path: "/path/to/mistral-7b.gguf"
+    context_size: 8192
+    gpu_layers: 35
+    
+  - name: "qwen-7b"
+    path: "/path/to/qwen-7b.gguf"
+    context_size: 8192
+    gpu_layers: 35
+
+server:
+  host: "0.0.0.0"
+  port: 8081
+  threads: 8
+```
+
+Then launch llama-swap with:
+
+```bash
+llama-swap --config llama-swap-config.yaml --listen 0.0.0.0:8081
+```
+
+### OpenWebUI Docker Container
+For a web-based interface to interact with your models, you can use the [OpenWebUI](https://github.com/open-webui/open-webui) Docker container. This provides a modern web UI similar to ChatGPT for interacting with your local models.
+
+Pull and run the OpenWebUI container:
+
+```bash
+docker pull ghcr.io/open-webui/open-webui:main
+```
+
+```bash
+docker run -d \
+  --name open-webui \
+  --restart always \
+  -p 3000:8080 \
+  -v open-webui:/app/backend/data \
+  --net=host \
+  ghcr.io/open-webui/open-webui:6.21
+```
+
+Access the web interface at `http://localhost:3000` to chat with your models.
 
 ## Results
 
