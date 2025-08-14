@@ -1,0 +1,19 @@
+[Unit]
+Description=Llama Server (Qwen3-Coder-30B)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/alpha/strix-halo-testing/llm-bench/llama.cpp-rocwmma/build/bin/llama-server \
+    --jinja -m /home/alpha/strix-halo-testing/llm-bench/models/Qwen3Coder30BA3B8BitXL/Qwen3-Coder-30B-A3B-Instruct-UD-Q8_K_XL.gguf \
+    -c 32000 -ngl 999 --port 8000 --host 0.0.0.0 --jinja -fa
+Restart=on-failure
+RestartSec=60
+
+# change to your user
+User=alpha
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

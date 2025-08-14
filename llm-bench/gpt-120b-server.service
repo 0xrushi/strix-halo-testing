@@ -1,0 +1,18 @@
+[Unit]
+Description=Llama Server (Qwen3-Coder-30B)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/alpha/strix-halo-testing/llm-bench/llama.cpp-rocwmma/build/bin/llama-server \
+    -m /home/alpha/strix-halo-testing/llm-bench/models/GPTOSSGGuf/gpt-oss-120b-F16.gguf \
+    -c 256000 -ngl 999 --port 8000 --host 0.0.0.0 -fa
+Restart=on-failure
+RestartSec=60
+# change to your user
+User=alpha
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

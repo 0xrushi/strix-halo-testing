@@ -172,3 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+*.gguf
+llm-bench/open-webui/cache/
+node_modules/
+deployment-scripts/
+beszel_data/
+results.jsonl
+raw_runs.jsonl
+system_info.json*

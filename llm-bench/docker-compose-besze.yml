@@ -1,0 +1,29 @@
+# Get the key and token for beszel-agent from the beszel-server container
+# docker container for beszel agent on amd gpus is not supported yet 
+
+#mkdir -p ./beszel_data && \
+#docker run -d \
+#  --name beszel \
+#  --restart=unless-stopped \
+#  -v ./beszel_data:/beszel_data \
+#  -p 8090:8090 \
+#  henrygd/beszel
+
+
+
+services:
+  beszel-agent:
+    image: henrygd/beszel-agent
+    container_name: beszel-agent
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./beszel_agent_data:/var/lib/beszel-agent
+      # monitor other disks / partitions by mounting a folder in /extra-filesystems
+      # - /mnt/disk/.beszel:/extra-filesystems/sda1:ro
+    environment:
+      LISTEN: 45876
+      KEY: ''
+      TOKEN: 1234
+      HUB_URL: http://192.168.1.166:8090

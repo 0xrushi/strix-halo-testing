@@ -1,0 +1,84 @@
+# llama-swap YAML configuration - Fixed Version
+# -----------------------------------------------
+
+# healthCheckTimeout: number of seconds to wait for a model to be ready
+# - optional, default: 120
+# - minimum value is 15 seconds
+healthCheckTimeout: 120  # Fixed: 500 was excessive, 120 is reasonable
+
+# logLevel: sets the logging value
+# - optional, default: info
+logLevel: info
+
+# startPort: sets the starting port number for the automatic ${PORT} macro
+# - optional, default: 5800
+startPort: 10001
+apiPort: 8082  # llama-swap's main API port
+
+# macros: reusable configuration snippets
+macros:
+  "latest-llama": >
+    llama.cpp-rocwmma/build/bin/llama-server
+    --host 0.0.0.0
+
+# models: dictionary of model configurations
+models:
+  "gpt-oss-20b-f16":
+    cmd: |
+      ${latest-llama}
+      --port ${PORT}
+      --model models/GPT20B/gpt-oss-20b-F16.gguf
+      -c 128000
+      -ngl 999
+      --chat-template models/GPT20B/template
+    ttl: 60
+    # Fixed: removed invalid 'filters' section - this isn't a documented feature
+
+  "qwen3-coder-30b-a3b":
+    unlisted: true
+    cmd: |
+      ${latest-llama}
+      --port ${PORT}
+      --model models/Qwen3Coder30BA3B8BitXL/Qwen3-Coder-30B-A3B-Instruct-UD-Q8_K_XL.gguf
+      -c 128000
+      -ngl 999
+
+  "glm-4.5-air":
+    cmd: |
+      ${latest-llama}
+      --port ${PORT}
+      --model models/GLM-4.5-Air-GGUF/Q8_0/GLM-4.5-Air-Q8_0-00001-of-00003.gguf
+      -c 128000
+      -ngl 999
+
+  "llama-4-scout":
+    cmd: |
+      ${latest-llama}
+      --port ${PORT}
+      --model models/Llama4ScoutGGUF/Q4_K_M/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00001-of-00002.gguf
+      -c 128000
+      -ngl 999
+
+  # Docker example (commented out as it references undefined models in groups):
+  # "docker-llama":
+  #   proxy: "http://127.0.0.1:${PORT}"
+  #   cmd: |
+  #     docker run --name dockertest-${PORT}
+  #     --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
+  #     ghcr.io/ggml-org/llama.cpp:server
+  #     --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
+  #   cmdStop: docker stop dockertest-${PORT}
+
+# groups: control model swapping behavior
+groups:
+  "main-group":
+    swap: true      # Only one model runs at a time
+    exclusive: true # Unloads other groups when this group runs
+    members:
+      - "gpt-oss-20b-f16"
+      - "qwen3-coder-30b-a3b" 
+      - "glm-4.5-air"
+      - "llama-4-scout"
+
+  # Removed group2 and forever groups since they reference undefined models
+  # Add them back when you define the referenced models:
