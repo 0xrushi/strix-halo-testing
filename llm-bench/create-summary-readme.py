@@ -8,6 +8,21 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tabulate import tabulate
 
+def remap_legacy_vulkan(df):
+    """Remap legacy 'vulkan' build names to 'vulkan_amdvlk' for backward compatibility."""
+    if df is None or df.empty:
+        return df
+    
+    # Create a copy to avoid modifying the original
+    df = df.copy()
+    
+    # Remap build names that are exactly 'vulkan' or end with '-vulkan' to use amdvlk variant
+    mask = (df['build'] == 'vulkan') | df['build'].str.endswith('-vulkan')
+    df.loc[mask, 'build'] = df.loc[mask, 'build'].str.replace(r'^vulkan$', 'vulkan_amdvlk', regex=True)
+    df.loc[mask, 'build'] = df.loc[mask, 'build'].str.replace(r'-vulkan$', '-vulkan_amdvlk', regex=True)
+    
+    return df
+
 # MODELS to lookup/render
 MODELS = {
     "dots.llm1.inst-UD-Q4_K_XL": {
@@ -15,7 +30,7 @@ MODELS = {
         "arch": "dots1 MoE",
         "weights": 142,
         "active": 14,
-        "pp": "vulkan_fa_b=256",
+        "pp": "vulkan_fa",
         "tg": "vulkan_fa_b=256",
         "line": {
             "color": (1.0, 0.0, 0.0, 0.9),
@@ -54,7 +69,7 @@ MODELS = {
         "arch": "Mistral 3",
         "weights": 24,
         "active": 24,
-        "pp": "hip_hipblaslt",
+        "pp": "rocwmma_hipblaslt_fa",
         "tg": "vulkan_fa",
         "line": {
             "color": (0.9, 0.7, 0.0, 0.9),
@@ -67,7 +82,7 @@ MODELS = {
         "arch": "Qwen 3 MoE",
         "weights": 30,
         "active": 3,
-        "pp": "rocmwmma_hipblaslt_fa",
+        "pp": "rocwmma_hipblaslt_fa",
         "tg": "vulkan_b=256",
         "line": {
             "color": (0.5, 0.5, 0.9, 0.9),
@@ -89,7 +104,7 @@ MODELS = {
         },
     },
     "Qwen3-235B-A22B-Instruct-2507-UD-Q3_K_XL": {
-        "name": "Qwen 3 235B-A22B UD-Q4_K_XL",
+        "name": "Qwen 3 235B-A22B UD-Q3_K_XL",
         "arch": "Qwen 3 MoE",
         "weights": 235,
         "active": 22,
@@ -106,8 +121,8 @@ MODELS = {
         "arch": "Llama 2",
         "weights": 7,
         "active": 7,
-        "pp": "vulkan",
-        "tg": "hip_hipblaslt_fa",
+        "pp": "vulkan_amdvlk_fa",
+        "tg": "vulkan_radv_fa",
         "line": {
             "color": (0.2, 0.5, 0.9, 0.9),
             "lw": 1,
@@ -166,6 +181,45 @@ MODELS = {
             "ls": "-",
         },
     },
+    "gpt-oss-20b-F16": {
+        "name": "OpenAI gpt-oss 20B MXFP4",
+        "arch": "gpt-oss",
+        "weights": 21,
+        "active": 3.6,
+        "pp": "hip_hipblaslt",
+        "tg": "vulkan_b=256",
+        "line": {
+            "color": (0.3, 0.3, 0.3, 0.9),
+            "lw": 1,
+            "ls": ":",
+        },
+    },
+    "gpt-oss-120b-F16": {
+        "name": "OpenAI gpt-oss 120B MXFP4",
+        "arch": "gpt-oss",
+        "weights": 117,
+        "active": 5.1,
+        "pp": "vulkan",
+        "tg": "vulkan_b=256",
+        "line": {
+            "color": (0.0, 0.0, 0.0, 0.9),
+            "lw": 1,
+            "ls": ":",
+        },
+    },
+    "GLM-4.5-Air-UD-Q4_K_XL": {
+        "name": "GLM 4.5 Air UD-Q4_K_XL",
+        "arch": "GLM 4.5",
+        "weights": 106,
+        "active": 12,
+        "pp": "vulkan_amdvlk_fa",
+        "tg": "vulkan_radv_fa",
+        "line": {
+            "color": (0.4, 0.8, 0.5, 0.9),
+            "lw": 1,
+            "ls": ":",
+        },
+    },
 }
 
 def load_model_results(model_key):
@@ -179,6 +233,7 @@ def load_model_results(model_key):
     
     try:
         df = pd.read_json(results_file, orient='records', lines=True)
+        df = remap_legacy_vulkan(df)
         return df
     except Exception as e:
         print(f"Error loading results for {model_key}: {e}")
@@ -194,16 +249,48 @@ def get_best_performance_for_backend(df, backend_config, mode, token_limit=None)
         mask = (df['build'].str.contains('vulkan', na=False)) & \
                (df['fa'] == '-fa 1') & \
                (df['b'] == '-b 256')
+    elif backend_config == "vulkan_amdvlk_fa_b=256":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '-b 256')
+    elif backend_config == "vulkan_radv_fa_b=256":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '-b 256')
     elif backend_config == "vulkan_fa":
         mask = (df['build'].str.contains('vulkan', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '')
+    elif backend_config == "vulkan_amdvlk_fa":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '')
+    elif backend_config == "vulkan_radv_fa":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
                (df['fa'] == '-fa 1') & \
                (df['b'] == '')
     elif backend_config == "vulkan_b=256":
         mask = (df['build'].str.contains('vulkan', na=False)) & \
                (df['fa'] == '') & \
                (df['b'] == '-b 256')
+    elif backend_config == "vulkan_amdvlk_b=256":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '-b 256')
+    elif backend_config == "vulkan_radv_b=256":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '-b 256')
     elif backend_config == "vulkan":
         mask = (df['build'].str.contains('vulkan', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '')
+    elif backend_config == "vulkan_amdvlk":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '')
+    elif backend_config == "vulkan_radv":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
                (df['fa'] == '') & \
                (df['b'] == '')
     elif backend_config == "hip_hipblaslt":
@@ -259,16 +346,48 @@ def get_best_performance(df, model_info, mode, token_limit=None):
         mask = (df['build'].str.contains('vulkan', na=False)) & \
                (df['fa'] == '-fa 1') & \
                (df['b'] == '-b 256')
+    elif best_backend == "vulkan_amdvlk_fa_b=256":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '-b 256')
+    elif best_backend == "vulkan_radv_fa_b=256":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '-b 256')
     elif best_backend == "vulkan_fa":
         mask = (df['build'].str.contains('vulkan', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '')
+    elif best_backend == "vulkan_amdvlk_fa":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '-fa 1') & \
+               (df['b'] == '')
+    elif best_backend == "vulkan_radv_fa":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
                (df['fa'] == '-fa 1') & \
                (df['b'] == '')
     elif best_backend == "vulkan_b=256":
         mask = (df['build'].str.contains('vulkan', na=False)) & \
                (df['fa'] == '') & \
                (df['b'] == '-b 256')
+    elif best_backend == "vulkan_amdvlk_b=256":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '-b 256')
+    elif best_backend == "vulkan_radv_b=256":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '-b 256')
     elif best_backend == "vulkan":
         mask = (df['build'].str.contains('vulkan', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '')
+    elif best_backend == "vulkan_amdvlk":
+        mask = (df['build'].str.contains('vulkan_amdvlk', na=False)) & \
+               (df['fa'] == '') & \
+               (df['b'] == '')
+    elif best_backend == "vulkan_radv":
+        mask = (df['build'].str.contains('vulkan_radv', na=False)) & \
                (df['fa'] == '') & \
                (df['b'] == '')
     elif best_backend == "hip_hipblaslt":
@@ -309,8 +428,12 @@ def get_best_performance(df, model_info, mode, token_limit=None):
 
 def convert_backend_to_human_readable(backend_config):
     """Convert backend configuration to human readable format."""
-    if backend_config.startswith("vulkan"):
-        return "Vulkan"
+    if backend_config.startswith("vulkan_amdvlk"):
+        return "Vulkan AMDVLK"
+    elif backend_config.startswith("vulkan_radv"):
+        return "Vulkan RADV"
+    elif backend_config.startswith("vulkan"):
+        return "Vulkan AMDVLK"  # Legacy vulkan maps to AMDVLK
     elif backend_config.startswith("hip"):
         return "HIP"
     elif backend_config.startswith("rocwmma"):

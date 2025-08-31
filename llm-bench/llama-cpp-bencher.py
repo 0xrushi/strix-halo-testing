@@ -45,7 +45,19 @@ RENDER = {
     "rocwmma_hipblaslt":  dict(color=(0.8, 0.5, 0.8, 0.9),  lw=1, ls="-",  marker="s"),
     "rocwmma_fa_hipblaslt": dict(color=(0.8, 0.5, 0.8, 0.9), lw=1, ls="--", marker="D"),
 
-    # Vulkan
+    # Vulkan AMDVLK
+    "vulkan_amdvlk":            dict(color=(0.0, 0.5, 0.0, 0.9), lw=1, ls="-",  marker="s"),
+    "vulkan_amdvlk_fa":         dict(color=(0.0, 0.5, 0.0, 0.9), lw=1, ls="--", marker="D"),
+    "vulkan_amdvlk_b=256":      dict(color=(0.0, 0.8, 0.5, 0.9), lw=1, ls="-",  marker="s"),
+    "vulkan_amdvlk_fa_b=256":   dict(color=(0.0, 0.8, 0.5, 0.9), lw=1, ls="--", marker="D"),
+
+    # Vulkan RADV
+    "vulkan_radv":            dict(color=(0.3, 0.5, 0.8, 0.9), lw=1, ls="-",  marker="s"),
+    "vulkan_radv_fa":         dict(color=(0.3, 0.5, 0.8, 0.9), lw=1, ls="--", marker="D"),
+    "vulkan_radv_b=256":      dict(color=(0.6, 0.8, 0.9, 0.9), lw=1, ls="-",  marker="s"),
+    "vulkan_radv_fa_b=256":   dict(color=(0.6, 0.8, 0.9, 0.9), lw=1, ls="--", marker="D"),
+
+    # Legacy Vulkan (backward compatibility - maps to AMDVLK)
     "vulkan":            dict(color=(0.0, 0.5, 0.0, 0.9), lw=1, ls="-",  marker="s"),
     "vulkan_fa":         dict(color=(0.0, 0.5, 0.0, 0.9), lw=1, ls="--", marker="D"),
     "vulkan_b=256":      dict(color=(0.0, 0.8, 0.5, 0.9), lw=1, ls="-",  marker="s"),
@@ -305,7 +317,18 @@ def _render_key(build: str, fa: str, b: str, hiplt: str) -> str:
 
 
 def _make_label(build: str, fa: str, b: str, hiplt: str) -> str:
-    backend = build.split("-", 1)[-1].upper()
+    backend = build.split("-", 1)[-1]
+    
+    # Handle friendly names for Vulkan variants
+    if backend == "vulkan_amdvlk":
+        backend_name = "Vulkan AMDVLK"
+    elif backend == "vulkan_radv":
+        backend_name = "Vulkan RADV"
+    elif backend == "vulkan":  # Legacy support
+        backend_name = "Vulkan AMDVLK"
+    else:
+        backend_name = backend.upper()
+    
     parts = []
     if hiplt:
         parts.append("hipBLASLt")
@@ -313,7 +336,7 @@ def _make_label(build: str, fa: str, b: str, hiplt: str) -> str:
         parts.append("fa=1")
     if b:
         parts.append(_format_b_flag(b))
-    return f"{backend} {' '.join(parts)}".strip()
+    return f"{backend_name} {' '.join(parts)}".strip()
 
 
 def comb_plot(df, metric, label, mode, out):
@@ -324,9 +347,16 @@ def comb_plot(df, metric, label, mode, out):
         style = RENDER.get(key, {})
         # Get latest result for each value in this configuration group
         latest_grp = grp.groupby('value').tail(1).sort_values('value')
+        
+        # For memory metrics, calculate combined delta
+        if metric == 'vram_peak_mib':
+            plot_data = latest_grp.get('vram_delta_mib', 0) + latest_grp.get('gtt_delta_mib', 0)
+        else:
+            plot_data = latest_grp[metric]
+            
         ax.plot(
             latest_grp["value"],
-            latest_grp[metric],
+            plot_data,
             label=_make_label(build, fa, b, hiplt),
             **style,
         )
@@ -368,7 +398,7 @@ def sweep_table(df,mode):
     return tabulate(table,headers=headers,tablefmt='github')
 
 def write_summary(df,out):
-    for met,lbl in [('tokens_per_sec','tokens/s'),('vram_peak_mib','Peak VRAM (MiB)')]:
+    for met,lbl in [('tokens_per_sec','tokens/s'),('vram_peak_mib','Memory Usage (MiB)')]:
         for mode in ('pp','tg'):
             comb_plot(df,met,lbl,mode,out)
 
@@ -379,10 +409,6 @@ def write_summary(df,out):
             return sub['tokens_per_sec'].iloc[-1] if not sub.empty else None
         pp512=_get('pp',512)
         tg128=_get('tg',128)
-        # Summarize memory based on the increase relative to the start of the
-        # run rather than the absolute peak values.  Using the delta fields
-        # ensures we report memory consumed by the benchmark itself even when
-        # the GPU already had allocations prior to the run.
         mem=(grp['vram_delta_mib'] + grp['gtt_delta_mib']).max()
         rows.append({'backend':b,'hipblaslt':hiplt,'fa':fa,'b':bf,'pp512':pp512,'tg128':tg128,'mem':mem})
 
@@ -423,6 +449,23 @@ def write_summary(df,out):
     md = ''.join(md_parts)
     (out/'README.md').write_text(md)
 
+# ------------------------- BACKWARD COMPATIBILITY ----------------------- #
+
+def remap_legacy_vulkan(df):
+    """Remap legacy 'vulkan' build names to 'vulkan_amdvlk' for backward compatibility."""
+    if df.empty:
+        return df
+    
+    # Create a copy to avoid modifying the original
+    df = df.copy()
+    
+    # Remap build names that are exactly 'vulkan' or end with '-vulkan' to use amdvlk variant
+    mask = (df['build'] == 'vulkan') | df['build'].str.endswith('-vulkan')
+    df.loc[mask, 'build'] = df.loc[mask, 'build'].str.replace(r'^vulkan$', 'vulkan_amdvlk', regex=True)
+    df.loc[mask, 'build'] = df.loc[mask, 'build'].str.replace(r'-vulkan$', '-vulkan_amdvlk', regex=True)
+    
+    return df
+
 # ------------------------------ MAIN ------------------------------------- #
 
 def main():
@@ -459,6 +502,7 @@ def main():
             logger.warning('No results.jsonl in {}', out)
             return
         df = pd.read_json(res, orient='records', lines=True)
+        df = remap_legacy_vulkan(df)
         write_summary(df, out)
         logger.info('Summary updated from existing results')
         return
@@ -484,6 +528,7 @@ def main():
     raw=(out/'raw_runs.jsonl').open('a');records=[]
     res_file=out/'results.jsonl'
     existing_df=pd.read_json(res_file,orient='records',lines=True) if res_file.exists() else pd.DataFrame()
+    existing_df=remap_legacy_vulkan(existing_df)
     base_flags=args.flags.strip()
     for b,bin in builds.items():
         env_opts=[{}]
@@ -491,6 +536,10 @@ def main():
         backend=b.split('-',1)[-1]
         if backend in ('hip','rocwmma'):
             env_opts.append({'ROCBLAS_USE_HIPBLASLT':'1'})
+        elif backend=='vulkan':
+            # For Vulkan, create separate environment configs for AMDVLK and RADV
+            env_opts=[{}, {'AMD_VULKAN_ICD':'RADV'}]
+            # env_opts=[{}]
         b_opts=['']
         if backend=='vulkan' and args.moe:
             b_opts.append('-b 256')
@@ -498,7 +547,12 @@ def main():
             for fa in ('','-fa 1'):
                 for bf in b_opts:
                     flags=" ".join(f for f in (base_flags,fa,bf) if f).strip()
-                    info={'build':b,'fa':fa.strip(), 'b':bf.strip(), 'hipblaslt':env.get('ROCBLAS_USE_HIPBLASLT','')}
+                    # Create backend name that includes vulkan driver variant
+                    build_name = b
+                    if backend == 'vulkan':
+                        vulkan_driver = 'radv' if env.get('AMD_VULKAN_ICD') == 'RADV' else 'amdvlk'
+                        build_name = f"{b.split('-vulkan')[0]}-vulkan_{vulkan_driver}" if '-vulkan' in b else f"vulkan_{vulkan_driver}"
+                    info={'build':build_name,'fa':fa.strip(), 'b':bf.strip(), 'hipblaslt':env.get('ROCBLAS_USE_HIPBLASLT','')}
                     for mode,vals in (('pp',pp),('tg',tg)):
                         for v in vals:
                             if not args.rerun and not existing_df.empty:
@@ -515,6 +569,7 @@ def main():
 
     new_df=pd.DataFrame(records)
     df=pd.concat([existing_df,new_df],ignore_index=True)
+    df=remap_legacy_vulkan(df)
     df.to_json(out/'results.jsonl',orient='records',lines=True)
     if not new_df.empty or args.rerun:
         write_summary(df,out)
